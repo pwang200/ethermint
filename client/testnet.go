@@ -52,6 +52,7 @@ var (
 	flagOutputDir         = "output-dir"
 	flagNodeDaemonHome    = "node-daemon-home"
 	flagStartingIPAddress = "starting-ip-address"
+	flagIPAddrs           = "ip-addrs"
 	flagEnableLogging     = "enable-logging"
 	flagRPCAddress        = "rpc.address"
 	flagAPIAddress        = "api.address"
@@ -68,6 +69,7 @@ type initArgs struct {
 	numValidators     int
 	outputDir         string
 	startingIPAddress string
+	ipAddresses       []string
 }
 
 type startArgs struct {
@@ -123,7 +125,7 @@ or a similar setup where each node has a manually configurable IP address.
 Note, strict routability for addresses is turned off in the config file.
 
 Example:
-	evmosd testnet init-files --v 4 --output-dir ./.testnets --starting-ip-address 192.168.10.2
+	ethermintd testnet init-files --v 4 --output-dir ./.testnets --starting-ip-address 192.168.10.2
 	`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			clientCtx, err := client.GetClientQueryContext(cmd)
@@ -141,6 +143,7 @@ Example:
 			args.nodeDirPrefix, _ = cmd.Flags().GetString(flagNodeDirPrefix)
 			args.nodeDaemonHome, _ = cmd.Flags().GetString(flagNodeDaemonHome)
 			args.startingIPAddress, _ = cmd.Flags().GetString(flagStartingIPAddress)
+			args.ipAddresses, _ = cmd.Flags().GetStringSlice(flagIPAddrs)
 			args.numValidators, _ = cmd.Flags().GetInt(flagNumValidators)
 			args.algo, _ = cmd.Flags().GetString(flags.FlagKeyAlgorithm)
 
@@ -152,6 +155,7 @@ Example:
 	cmd.Flags().String(flagNodeDirPrefix, "node", "Prefix the directory name for each node with (node results in node0, node1, ...)")
 	cmd.Flags().String(flagNodeDaemonHome, "evmosd", "Home directory of the node's daemon configuration")
 	cmd.Flags().String(flagStartingIPAddress, "192.168.0.1", "Starting IP address (192.168.0.1 results in persistent peers list ID0@192.168.0.1:46656, ID1@192.168.0.2:46656, ...)")
+	cmd.Flags().StringSlice(flagIPAddrs, []string{}, "List of IP addresses to use (i.e. `192.168.0.1,172.168.0.1` results in persistent peers list ID0@192.168.0.1:46656, ID1@172.168.0.1)")
 	cmd.Flags().String(flags.FlagKeyringBackend, flags.DefaultKeyringBackend, "Select keyring's backend (os|file|test)")
 
 	return cmd
@@ -250,6 +254,15 @@ func initTestnetFiles(
 		if err != nil {
 			_ = os.RemoveAll(args.outputDir)
 			return err
+		}
+		if len(args.ipAddresses) == 0 {
+			ip, err = getIP(i, args.startingIPAddress)
+			if err != nil {
+				_ = os.RemoveAll(args.outputDir)
+				return err
+			}
+		} else {
+			ip = args.ipAddresses[i]
 		}
 
 		nodeIDs[i], valPubKeys[i], err = genutil.InitializeNodeValidatorFiles(nodeConfig)
