@@ -234,11 +234,11 @@ func initTestnetFiles(
 	)
 
 	inBuf := bufio.NewReader(cmd.InOrStdin())
+	gentxsDir := filepath.Join(args.outputDir, "gentxs")
 	// generate private keys, node IDs, and initial transactions
 	for i := 0; i < args.numValidators; i++ {
 		nodeDirName := fmt.Sprintf("%s%d", args.nodeDirPrefix, i)
 		nodeDir := filepath.Join(args.outputDir, nodeDirName, args.nodeDaemonHome)
-		gentxsDir := filepath.Join(args.outputDir, "gentxs")
 
 		nodeConfig.SetRoot(nodeDir)
 		nodeConfig.RPC.ListenAddress = "tcp://0.0.0.0:26657"
@@ -361,6 +361,69 @@ func initTestnetFiles(
 		}
 
 		srvconfig.WriteConfigFile(filepath.Join(nodeDir, "config/app.toml"), appConfig)
+	}
+
+	{
+		nodeDirName := fmt.Sprintf("%s%s", args.nodeDirPrefix, "faucet")
+		nodeDir := filepath.Join(args.outputDir, nodeDirName, args.nodeDaemonHome)
+		nodeConfig.SetRoot(nodeDir)
+		//nodeConfig.RPC.ListenAddress = "tcp://0.0.0.0:26657"
+
+		if err := os.MkdirAll(filepath.Join(nodeDir, "config"), nodeDirPerm); err != nil {
+			_ = os.RemoveAll(args.outputDir)
+			return err
+		}
+		nodeConfig.Moniker = nodeDirName
+
+		genFiles = append(genFiles, nodeConfig.GenesisFile())
+
+		kb, err := keyring.New(sdk.KeyringServiceName(), args.keyringBackend, nodeDir, inBuf, hd.EthSecp256k1Option())
+		if err != nil {
+			return err
+		}
+
+		keyringAlgos, _ := kb.SupportedAlgorithms()
+		algo, err := keyring.NewSigningAlgoFromString(args.algo, keyringAlgos)
+		if err != nil {
+			return err
+		}
+
+		addr, secret, err := testutil.GenerateSaveCoinKey(kb, nodeDirName, "", true, algo)
+		if err != nil {
+			_ = os.RemoveAll(args.outputDir)
+			return err
+		}
+
+		info := map[string]string{"secret": secret}
+
+		cliPrint, err := json.Marshal(info)
+		if err != nil {
+			return err
+		}
+
+		// save private key seed words
+		if err := network.WriteFile(fmt.Sprintf("%v.json", "key_seed"), nodeDir, cliPrint); err != nil {
+			return err
+		}
+
+		accStakingTokens := sdk.TokensFromConsensusPower(50000000000, ethermint.PowerReduction)
+		coins := sdk.Coins{
+			sdk.NewCoin(ethermint.AttoPhoton, accStakingTokens),
+		}
+
+		genBalances = append(genBalances, banktypes.Balance{Address: addr.String(), Coins: coins.Sort()})
+		genAccounts = append(genAccounts, &ethermint.EthAccount{
+			BaseAccount: authtypes.NewBaseAccount(addr, nil, 0, 0),
+			CodeHash:    common.BytesToHash(evmtypes.EmptyCodeHash).Hex(),
+		})
+
+		//customAppTemplate, customAppConfig := config.AppConfig(ethermint.AttoPhoton)
+		//srvconfig.SetConfigTemplate(customAppTemplate)
+		//if err := sdkserver.InterceptConfigsPreRunHandler(cmd, customAppTemplate, customAppConfig); err != nil {
+		//	return err
+		//}
+		//
+		//srvconfig.WriteConfigFile(filepath.Join(nodeDir, "config/app.toml"), appConfig)
 	}
 
 	if err := initGenFiles(clientCtx, mbm, args.chainID, ethermint.AttoPhoton, genAccounts, genBalances, genFiles, args.numValidators); err != nil {
